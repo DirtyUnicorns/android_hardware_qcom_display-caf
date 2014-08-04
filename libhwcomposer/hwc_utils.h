@@ -31,6 +31,7 @@
 #include <linux/fb.h>
 #include "qdMetaData.h"
 #include <overlayUtils.h>
+#include <cutils/sockets.h>
 
 #define ALIGN_TO(x, align)     (((x) + ((align)-1)) & ~((align)-1))
 #define LIKELY( exp )       (__builtin_expect( (exp) != 0, true  ))
@@ -38,6 +39,7 @@
 #define MAX_NUM_APP_LAYERS 32
 #define MAX_DISPLAY_DIM 2048
 
+#define DAEMON_SOCKET "pps"
 //Fwrd decls
 struct hwc_context_t;
 
@@ -116,6 +118,14 @@ struct LayerProp {
 struct VsyncState {
     bool enable;
     bool fakevsync;
+};
+
+struct CablProp {
+    bool enabled;
+    bool start;
+    bool videoOnly;
+    //daemon_socket for connection to pp-daemon
+    int daemon_socket;
 };
 
 // LayerProp::flag values
@@ -374,13 +384,8 @@ inline void swap(T& a, T& b) {
     a = b;
     b = tmp;
 }
-int getSocIdFromSystem();
-}; //qhwc namespace
 
-enum eAnimationState{
-    ANIMATION_STOPPED,
-    ANIMATION_STARTED,
-};
+}; //qhwc namespace
 
 // -----------------------------------------------------------------------------
 // HWC context
@@ -408,14 +413,21 @@ struct hwc_context_t {
     qhwc::ListStats listStats[HWC_NUM_DISPLAY_TYPES];
     qhwc::LayerProp *layerProp[HWC_NUM_DISPLAY_TYPES];
     qhwc::MDPComp *mMDPComp[HWC_NUM_DISPLAY_TYPES];
+    qhwc::CablProp mCablProp;
     qhwc::HwcDebug *mHwcDebug[HWC_NUM_DISPLAY_TYPES];
     hwc_rect_t mViewFrame[HWC_NUM_DISPLAY_TYPES];
+
     // stores the #numHwLayers of the previous frame
     // for each display device
     int mPrevHwLayerCount[HWC_NUM_DISPLAY_TYPES];
-    eAnimationState mAnimationState[HWC_NUM_DISPLAY_TYPES];
-    // stores the primary device orientation
+
+    // No animation on External display feature
+    // Notifies hwcomposer about the device orientation before animation.
     int deviceOrientation;
+    // Stores the crop, dest rect and transform value of video before animation.
+    hwc_rect_t mPrevCropVideo;
+    hwc_rect_t mPrevDestVideo;
+    int mPrevTransformVideo;
     //Securing in progress indicator
     bool mSecuring;
     //WFD on proprietary stack
@@ -437,9 +449,9 @@ struct hwc_context_t {
     //Used for SideSync feature
     //which overrides the mExtOrientation
     bool mBufferMirrorMode;
-    //used for enabling C2D Feature only for 8960 Non Pro Device
-    int mSocId;
+
     qhwc::LayerRotMap *mLayerRotMap[HWC_NUM_DISPLAY_TYPES];
+
     //previous Width & Height
     overlay::utils::Whf mPrevWHF[HWC_NUM_DISPLAY_TYPES];
     // Panel reset flag will be set if BTA check fails
